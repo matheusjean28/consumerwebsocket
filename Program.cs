@@ -8,60 +8,47 @@ class Program
 {
     static async Task Main(string[] args)
     {
-        Uri serverUri = new("ws://localhost:5146/api/chat?name={name}");
-
-        using (ClientWebSocket clientWebSocket = new())
+        var ws = new ClientWebSocket();
+        string name;
+        Console.Write("text your username:  ");
+        while (true)
         {
-            try
+            name = Console.ReadLine();
+            break;
+        };
+
+        Console.WriteLine("Connecting to server...");
+        await ws.ConnectAsync(new Uri($"ws://localhost:5146/api/chat?name={name}"), CancellationToken.None);
+        Console.WriteLine("Connected");
+
+        using var receiveTask = Task.Run(async () =>
+        {
+            var buffer = new byte[1024 * 4];
+            while (true)
             {
-                await clientWebSocket.ConnectAsync(serverUri, CancellationToken.None);
-
-                _ = ReceiveMessage(clientWebSocket);
-
-                while (true)
+                var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                if (result.MessageType == WebSocketMessageType.Close)
                 {
-                    Console.Write("Text your message! (or 'exit' to get out): ");
-                    string name = Console.ReadLine();
-
-                    if (name.ToLower() == "exit")
-                        break;
-
-                    await SendMessage(clientWebSocket, name);
+                    break;
                 }
+                var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                Console.WriteLine("Received: " + message);
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Erro: {ex.Message}");
-            }
-            finally
-            {
-                if (clientWebSocket.State == WebSocketState.Open)
-                    await clientWebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing your connection", CancellationToken.None);
-            }
-        }
-    }
+        });
 
-    static async Task SendMessage(ClientWebSocket webSocket, string message)
-    {
-        byte[] messageBytes = Encoding.UTF8.GetBytes(message);
-        await webSocket.SendAsync(new ArraySegment<byte>(messageBytes), WebSocketMessageType.Text, true, CancellationToken.None);
-    }
+        // Send a message to the server
+        string initialMessage = "Hello, server!";
+        byte[] initialMessageBytes = Encoding.UTF8.GetBytes(initialMessage);
+        await ws.SendAsync(new ArraySegment<byte>(initialMessageBytes), WebSocketMessageType.Text, true, CancellationToken.None);
 
-    static async Task ReceiveMessage(ClientWebSocket webSocket)
-    {
-        byte[] buffer = new byte[1024];
-        while (webSocket.State == WebSocketState.Open)
-        {
-            WebSocketReceiveResult result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-            if (result.MessageType == WebSocketMessageType.Close)
-            {
-                break;
-            }
-            if (result.MessageType == WebSocketMessageType.Text)
-            {
-                string receivedMessage = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                Console.WriteLine($"Recived message: {receivedMessage}");
-            }
-        }
+        // Keep the console application running until the user decides to exit
+        Console.WriteLine("Press Enter to exit.");
+        Console.ReadLine();
+
+        // Close the WebSocket connection
+        await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing connection", CancellationToken.None);
+
+        // Wait for the receiveTask to complete
+        await receiveTask;
     }
 }
